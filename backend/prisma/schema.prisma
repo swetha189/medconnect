@@ -1,0 +1,205 @@
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model User {
+  id                   Int            @id @default(autoincrement())
+  email                String         @unique
+  passwordHash         String
+  role                 String         // "PATIENT", "DOCTOR", "HOSPITAL_ADMIN", "LAB_TECHNICIAN", "PHARMACIST", "SUPER_ADMIN"
+  firstName            String
+  lastName             String
+  phone                String?
+  createdAt            DateTime       @default(now())
+  
+  patient              Patient?
+  doctor               Doctor?
+  auditLogs            AuditLog[]
+  notifications        Notification[]
+  consentGrantsReceived ConsentGrant[] @relation("UserConsentGrants")
+}
+
+model Patient {
+  id                   Int            @id @default(autoincrement())
+  userId               Int            @unique
+  user                 User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  dateOfBirth          String
+  gender               String
+  bloodGroup           String?
+  allergies            String?
+  emergencyContactName String?
+  emergencyContactPhone String?
+  
+  appointments         Appointment[]
+  medicalRecords       MedicalRecord[]
+  prescriptions        Prescription[]
+  labReports           LabReport[]
+  consentGrants        ConsentGrant[]
+  referrals            Referral[]
+}
+
+model Hospital {
+  id                      Int          @id @default(autoincrement())
+  name                    String
+  address                 String
+  latitude                Float?
+  longitude               Float?
+  phone                   String?
+  
+  // Bed availability
+  totalBeds               Int          @default(0)
+  icuBeds                 Int          @default(0)
+  emergencyBeds           Int          @default(0)
+  nicuBeds                Int          @default(0)
+  availableBeds           Int          @default(0)
+  availableIcuBeds        Int          @default(0)
+  availableEmergencyBeds  Int          @default(0)
+  availableNicuBeds       Int          @default(0)
+
+  doctors                 Doctor[]
+  departments             Department[]
+  appointments            Appointment[]
+  referralsSent           Referral[]   @relation("ReferralsSent")
+  referralsReceived       Referral[]   @relation("ReferralsReceived")
+}
+
+model Doctor {
+  id                   Int            @id @default(autoincrement())
+  userId               Int            @unique
+  user                 User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  hospitalId           Int
+  hospital             Hospital       @relation(fields: [hospitalId], references: [id], onDelete: Cascade)
+  specialization       String
+  qualification        String
+  experienceYears      Int            @default(0)
+  consultationFee      Float          @default(0)
+  availabilitySchedule String         // JSON String of slots, e.g., '["09:00", "10:00", "11:00", "14:00", "15:00"]'
+  isLeave              Boolean        @default(false)
+  approvalStatus       String         @default("PENDING") // PENDING, APPROVED, REJECTED
+  
+  appointments         Appointment[]
+  medicalRecords       MedicalRecord[]
+  prescriptions        Prescription[]
+  referrals            Referral[]
+}
+
+model Department {
+  id          Int      @id @default(autoincrement())
+  hospitalId  Int
+  hospital    Hospital @relation(fields: [hospitalId], references: [id], onDelete: Cascade)
+  name        String
+  description String?
+}
+
+model Appointment {
+  id          Int      @id @default(autoincrement())
+  patientId   Int
+  patient     Patient  @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  doctorId    Int
+  doctor      Doctor   @relation(fields: [doctorId], references: [id], onDelete: Cascade)
+  hospitalId  Int
+  hospital    Hospital @relation(fields: [hospitalId], references: [id], onDelete: Cascade)
+  date        String   // YYYY-MM-DD
+  slotTime    String   // HH:MM
+  status      String   @default("PENDING") // PENDING, CONFIRMED, CHECKED_IN, COMPLETED, CANCELLED, NO_SHOW, RESCHEDULED
+  notes       String?
+}
+
+model MedicalRecord {
+  id            Int            @id @default(autoincrement())
+  patientId     Int
+  patient       Patient        @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  doctorId      Int
+  doctor        Doctor         @relation(fields: [doctorId], references: [id], onDelete: Cascade)
+  visitDate     String         // YYYY-MM-DD
+  diagnosis     String
+  treatmentPlan String
+  followUpNotes String?
+  
+  prescriptions Prescription[]
+}
+
+model Prescription {
+  id              Int                @id @default(autoincrement())
+  medicalRecordId Int?
+  medicalRecord   MedicalRecord?     @relation(fields: [medicalRecordId], references: [id], onDelete: SetNull)
+  patientId       Int
+  patient         Patient            @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  doctorId        Int
+  doctor          Doctor             @relation(fields: [doctorId], references: [id], onDelete: Cascade)
+  status          String             @default("PENDING") // PENDING, DISPATCHED, COMPLETED
+  createdAt       DateTime           @default(now())
+  
+  items           PrescriptionItem[]
+}
+
+model PrescriptionItem {
+  id             Int          @id @default(autoincrement())
+  prescriptionId Int
+  prescription   Prescription @relation(fields: [prescriptionId], references: [id], onDelete: Cascade)
+  medicineName   String
+  dosage         String       // e.g. 500mg
+  frequency      String       // e.g. Twice daily (1-0-1)
+  duration       String       // e.g. 5 days
+}
+
+model ConsentGrant {
+  id           Int      @id @default(autoincrement())
+  patientId    Int
+  patient      Patient  @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  targetUserId Int
+  targetUser   User     @relation("UserConsentGrants", fields: [targetUserId], references: [id], onDelete: Cascade)
+  accessType   String   // e.g. "VIEW_RECORDS", "ALL"
+  expiresAt    String   // ISO Timestamp or date
+  revokedAt    String?  // ISO Timestamp or null
+}
+
+model Referral {
+  id               Int      @id @default(autoincrement())
+  patientId        Int
+  patient          Patient  @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  sourceHospitalId Int
+  sourceHospital   Hospital @relation("ReferralsSent", fields: [sourceHospitalId], references: [id], onDelete: Cascade)
+  targetHospitalId Int
+  targetHospital   Hospital @relation("ReferralsReceived", fields: [targetHospitalId], references: [id], onDelete: Cascade)
+  doctorId         Int
+  doctor           Doctor   @relation(fields: [doctorId], references: [id], onDelete: Cascade)
+  reason           String
+  status           String   @default("SENT") // SENT, ACCEPTED, APPOINTMENT_BOOKED, COMPLETED
+}
+
+model LabReport {
+  id                Int      @id @default(autoincrement())
+  patientId         Int
+  patient           Patient  @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  testName          String
+  fileUrl           String   // Path to PDF
+  uploadedBy        Int      // User ID of the Lab Tech
+  status            String   @default("COMPLETED")
+  isCritical        Boolean  @default(false)
+  criticalAlertSent Boolean  @default(false)
+}
+
+model Notification {
+  id        Int      @id @default(autoincrement())
+  userId    Int
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  message   String
+  isRead    Boolean  @default(false)
+  type      String   // APPOINTMENT, REFERRAL, RECORD, SYSTEM
+  createdAt DateTime @default(now())
+}
+
+model AuditLog {
+  id        Int      @id @default(autoincrement())
+  userId    Int?
+  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  action    String
+  ipAddress String?
+  createdAt DateTime @default(now())
+}
